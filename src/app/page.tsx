@@ -19,13 +19,16 @@ export default async function HomePage() {
     return <LandingHero />;
   }
 
-  const user = await safeGetUser(session.user.id);
+  // Requêtes en parallèle (Promise.all) au lieu de séquentiel : moitié de la
+  // latence cross-region Vercel→Supabase.
+  const [user, programmesPourRotation] = await Promise.all([
+    safeGetUser(session.user.id),
+    safeGetProgrammesForRotation(session.user.id),
+  ]);
   const userPseudo = user?.pseudo ?? session.user.pseudo ?? "Toi";
   const niveau = user?.niveau ?? 1;
   const streak = user?.streakActuel ?? 0;
   const xpPct = computeXpProgress(user?.xp ?? 0, niveau);
-
-  const programmesPourRotation = await safeGetProgrammesForRotation(session.user.id);
 
   // Phase 5+ : ces données seront branchées
   const volumeCeMois = 0;

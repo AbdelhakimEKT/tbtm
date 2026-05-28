@@ -28,7 +28,8 @@ export function BottomNav() {
     id: string;
   } | null>(null);
 
-  // Check séance en cours (polling léger toutes les 30s pour refresh)
+  // Check séance en cours : à chaque navigation + quand on revient sur l'onglet.
+  // (Pas de polling permanent, ça spam la BDD pour rien.)
   useEffect(() => {
     let cancelled = false;
     async function check() {
@@ -42,12 +43,15 @@ export function BottomNav() {
       }
     }
     check();
-    const interval = setInterval(check, 30_000);
+    function onFocus() {
+      if (document.visibilityState === "visible") check();
+    }
+    document.addEventListener("visibilitychange", onFocus);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [pathname]); // refetch quand on change de page
+  }, [pathname]);
 
   // On masque la nav sur les pages d'auth et de séance en direct (immersif)
   if (

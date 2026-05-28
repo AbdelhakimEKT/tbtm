@@ -59,7 +59,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} dark`}
       suppressHydrationWarning
     >
-      <body className="flex min-h-svh flex-col bg-bg text-fg antialiased">
+      <body className="flex min-h-svh flex-col bg-bg text-fg antialiased safe-area-top">
         <Providers>
           <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
             <HideOnRoutes

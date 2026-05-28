@@ -78,6 +78,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Respecte la safe area iOS (notch, dynamic island, home indicator) */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
 /* Empêche le zoom involontaire sur iOS quand on focus un input */
 input,
 select,
