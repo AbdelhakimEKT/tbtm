@@ -1,0 +1,589 @@
+// TBTM — schéma de base de données
+// Tous les modèles métier + tables NextAuth (Account, Session, VerificationToken)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ----------------------------------------------------------------------------
+// Auth (NextAuth.js v5 / Auth.js)
+// ----------------------------------------------------------------------------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ----------------------------------------------------------------------------
+// User & social
+// ----------------------------------------------------------------------------
+
+enum Objectif {
+  PRISE_DE_MASSE
+  SECHE
+  FORCE
+  FORME_GENERALE
+}
+
+enum CategorieForce {
+  NOVICE
+  DEBUTANT
+  INTERMEDIAIRE
+  AVANCE
+  EXPERT
+}
+
+enum Theme {
+  DARK
+  LIGHT
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Sexe {
+  HOMME
+  FEMME
+  AUTRE
+}
+
+enum NiveauActivite {
+  SEDENTAIRE       // bureau, peu de mouvement
+  LEGER            // 1-2 séances/sem
+  MODERE           // 3-5 séances/sem (défaut TBTM)
+  ACTIF            // 6-7 séances/sem
+  TRES_ACTIF       // pro / 2× par jour
+}
+
+model User {
+  id            String    @id @default(cuid())
+  pseudo        String    @unique
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  avatar        String?
+  ville         String?
+
+  poidsKg        Float?
+  tailleCm       Int?
+  age            Int?
+  sexe           Sexe?
+  niveauActivite NiveauActivite @default(MODERE)
+  objectif       Objectif       @default(FORME_GENERALE)
+  categorie      CategorieForce @default(NOVICE)
+  niveau         Int            @default(1)
+  xp             Int            @default(0)
+  theme          Theme          @default(DARK)
+  role           Role           @default(USER)
+
+  // Spotify
+  spotifyAccessToken  String?   @db.Text
+  spotifyRefreshToken String?   @db.Text
+  spotifyExpiresAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  accounts Account[]
+  sessions Session[]
+
+  exercicesCrees   Exercice[]
+  programmes       Programme[]
+  seances          Seance[]
+  prs              PR[]
+  nutritionLogs    NutritionLog[]
+  recettesCreees   Recette[]
+  ingredientsCrees Ingredient[]
+  userBadges       UserBadge[]
+
+  // Amis (relation symétrique)
+  amitiesEnvoyees Amitie[] @relation("amitieDe")
+  amitiesRecues   Amitie[] @relation("amitieA")
+
+  // Défis
+  defisLances        Defi[]            @relation("defiCreateur")
+  defiParticipations DefiParticipant[]
+  defiCommentaires   DefiCommentaire[]
+
+  // Streak
+  streakActuel       Int       @default(0)
+  streakMax          Int       @default(0)
+  dernierJourEntrain DateTime?
+}
+
+enum StatutAmitie {
+  EN_ATTENTE
+  ACCEPTEE
+  BLOQUEE
+}
+
+model Amitie {
+  id        String       @id @default(cuid())
+  deId      String
+  aId       String
+  statut    StatutAmitie @default(EN_ATTENTE)
+  createdAt DateTime     @default(now())
+
+  de User @relation("amitieDe", fields: [deId], references: [id], onDelete: Cascade)
+  a  User @relation("amitieA", fields: [aId], references: [id], onDelete: Cascade)
+
+  @@unique([deId, aId])
+  @@index([aId])
+}
+
+// ----------------------------------------------------------------------------
+// Exercices
+// ----------------------------------------------------------------------------
+
+enum Muscle {
+  PECTORAUX
+  DOS
+  EPAULES
+  BICEPS
+  TRICEPS
+  AVANT_BRAS
+  ABDOS
+  LOMBAIRES
+  QUADRICEPS
+  ISCHIOS
+  FESSIERS
+  MOLLETS
+  TRAPEZES
+}
+
+enum Materiel {
+  POIDS_DE_CORPS
+  HALTERES
+  BARRE
+  BARRE_TRACTION
+  BARRE_DIPS
+  ELASTIQUE
+  LEST
+  POULIE
+  MACHINE
+  KETTLEBELL
+}
+
+enum Prise {
+  PRONATION
+  SUPINATION
+  NEUTRE
+  PRISE_LARGE
+  PRISE_SERREE
+  PRISE_MIXTE
+}
+
+enum Dynamisme {
+  EXPLOSIF
+  CONTROLE
+  ISOMETRIQUE
+}
+
+model Exercice {
+  id             String     @id @default(cuid())
+  nom            String
+  description    String?    @db.Text
+  guideExecution String?    @db.Text
+  muscles        Muscle[]
+  materiel       Materiel[]
+  prise          Prise?
+  dynamisme      Dynamisme  @default(CONTROLE)
+  tempo          String? // ex "3-1-1-0"
+  isLeste        Boolean    @default(false) // exercices au poids du corps lestables (dips, tractions)
+
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  programmeExercices ProgrammeExercice[]
+  seanceSets         SeanceSet[]
+  prs                PR[]
+
+  @@index([createdById])
+}
+
+// ----------------------------------------------------------------------------
+// Programmes
+// ----------------------------------------------------------------------------
+
+enum Visibilite {
+  PRIVE
+  AMIS
+  COMMUNAUTE
+}
+
+model Programme {
+  id          String     @id @default(cuid())
+  nom         String
+  description String?    @db.Text
+  tags        Muscle[]
+  visibilite  Visibilite @default(PRIVE)
+
+  estProgrammeActif Boolean @default(false)
+  frequenceHebdo    Int? // séances/semaine cibles
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  exercices ProgrammeExercice[]
+  seances   Seance[]
+  defis     Defi[]
+
+  @@index([createdById])
+  @@index([visibilite])
+}
+
+model ProgrammeExercice {
+  id            String  @id @default(cuid())
+  ordre         Int
+  seriesCibles  Int     @default(3)
+  repsCibles    Int     @default(8)
+  poidsCible    Float? // null si poids de corps (ou stocké en kg pour BW+X)
+  bwPlusKg      Float? // poids ajouté en lest pour exos poids de corps
+  tempsRecupSec Int     @default(90)
+  notes         String? @db.Text
+
+  programmeId String
+  exerciceId  String
+  programme   Programme @relation(fields: [programmeId], references: [id], onDelete: Cascade)
+  exercice    Exercice  @relation(fields: [exerciceId], references: [id], onDelete: Restrict)
+
+  @@unique([programmeId, ordre])
+  @@index([exerciceId])
+}
+
+// ----------------------------------------------------------------------------
+// Séances
+// ----------------------------------------------------------------------------
+
+enum StatutSeance {
+  EN_COURS
+  TERMINEE
+  ANNULEE
+}
+
+model Seance {
+  id                String       @id @default(cuid())
+  date              DateTime     @default(now())
+  dureeSec          Int? // null si en cours
+  volumeTotalKg     Float        @default(0)
+  noteDeFormeDuJour Int? // 1-5 étoiles
+  statut            StatutSeance @default(EN_COURS)
+  xpGagne           Int          @default(0)
+  notes             String?      @db.Text
+
+  userId      String
+  programmeId String?
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  programme   Programme? @relation(fields: [programmeId], references: [id], onDelete: SetNull)
+
+  sets SeanceSet[]
+  prs  PR[] // PRs battus dans cette séance
+
+  @@index([userId, date])
+}
+
+model SeanceSet {
+  id        String  @id @default(cuid())
+  ordre     Int
+  poidsKg   Float
+  bwPlusKg  Float? // pour exos poids de corps lestés
+  reps      Int
+  rir       Int? // Reps in Reserve
+  isBonus   Boolean @default(false)
+  isWarmup  Boolean @default(false)
+  validated Boolean @default(false)
+  restSec   Int? // récup réellement prise
+
+  seanceId   String
+  exerciceId String
+  seance     Seance   @relation(fields: [seanceId], references: [id], onDelete: Cascade)
+  exercice   Exercice @relation(fields: [exerciceId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([seanceId])
+  @@index([exerciceId])
+}
+
+model PR {
+  id       String   @id @default(cuid())
+  poidsKg  Float
+  bwPlusKg Float?
+  reps     Int
+  oneRmKg  Float // 1RM estimé (Epley par défaut)
+  date     DateTime @default(now())
+
+  userId     String
+  exerciceId String
+  seanceId   String?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exercice   Exercice @relation(fields: [exerciceId], references: [id], onDelete: Cascade)
+  seance     Seance?  @relation(fields: [seanceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, exerciceId])
+}
+
+// ----------------------------------------------------------------------------
+// Nutrition
+// ----------------------------------------------------------------------------
+
+enum Repas {
+  PETIT_DEJEUNER
+  DEJEUNER
+  DINER
+  COLLATION
+}
+
+enum PortionType {
+  CUILLERE_CAFE // ~5g
+  CUILLERE_SOUPE // ~15g
+  POIGNEE // ~30g
+  BOL // ~250ml
+  ASSIETTE // ~300g
+  GRAMMES // saisie libre
+  UNITE // pour items unitaires (1 oeuf, 1 fruit)
+}
+
+model NutritionLog {
+  id    String   @id @default(cuid())
+  date  DateTime @default(now())
+  repas Repas
+
+  portionType PortionType
+  quantite    Float // valeur dans l'unité du PortionType (ex: 2 cuillères = 2)
+  grammesEq   Float // équivalent en grammes calculé au moment du log
+
+  // Macros au moment du log (figées pour éviter recalculs si l'aliment est modifié)
+  calories  Float
+  proteines Float
+  glucides  Float
+  lipides   Float
+
+  userId       String
+  ingredientId String?
+  recetteId    String?
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient? @relation(fields: [ingredientId], references: [id], onDelete: SetNull)
+  recette      Recette?    @relation(fields: [recetteId], references: [id], onDelete: SetNull)
+
+  @@index([userId, date])
+}
+
+model Ingredient {
+  id              String  @id @default(cuid())
+  nom             String
+  photo           String?
+  // Macros par 100g
+  caloriesP100    Float
+  proteinesP100   Float
+  glucidesP100    Float
+  lipidesP100     Float
+  openFoodFactsId String? @unique
+
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  recetteIngredients RecetteIngredient[]
+  nutritionLogs      NutritionLog[]
+}
+
+enum CategorieRecette {
+  PETIT_DEJEUNER
+  PLAT
+  COLLATION
+  DESSERT
+  BOISSON
+  SAUCE
+}
+
+model Recette {
+  id           String           @id @default(cuid())
+  nom          String
+  description  String?          @db.Text
+  photo        String?
+  portions     Int              @default(1)
+  tempsPrepMin Int?
+  categorie    CategorieRecette
+  visibilite   Visibilite       @default(PRIVE)
+  noteMoyenne  Float?
+  nbVotes      Int              @default(0)
+
+  // Macros saisies manuellement (par portion). Si renseignés, ils prennent
+  // priorité sur le calcul depuis les ingrédients — utile pour saisir
+  // rapidement les macros d'un repas type "restaurant" sans lister tout.
+  macrosManuelles      Boolean @default(false)
+  caloriesPortion      Float?
+  proteinesPortion     Float?
+  glucidesPortion      Float?
+  lipidesPortion       Float?
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ingredients   RecetteIngredient[]
+  nutritionLogs NutritionLog[]
+
+  @@index([createdById])
+  @@index([visibilite])
+}
+
+model RecetteIngredient {
+  id      String @id @default(cuid())
+  grammes Float
+  ordre   Int    @default(0)
+
+  recetteId    String
+  ingredientId String
+  recette      Recette    @relation(fields: [recetteId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+}
+
+// ----------------------------------------------------------------------------
+// Gamification
+// ----------------------------------------------------------------------------
+
+enum BadgeRarete {
+  COMMUN
+  RARE
+  EPIQUE
+  LEGENDAIRE
+  MYSTERE
+}
+
+model Badge {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  nom         String
+  description String
+  icone       String // nom d'icône Lucide ou emoji
+  rarete      BadgeRarete @default(COMMUN)
+  isSecret    Boolean     @default(false)
+  ordre       Int         @default(0)
+
+  userBadges UserBadge[]
+}
+
+model UserBadge {
+  id         String   @id @default(cuid())
+  userId     String
+  badgeId    String
+  debloqueAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge      Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// Défis
+// ----------------------------------------------------------------------------
+
+enum StatutDefi {
+  OUVERT
+  EN_COURS
+  TERMINE
+  ANNULE
+}
+
+enum StatutDefiParticipant {
+  EN_ATTENTE
+  ACCEPTE
+  REFUSE
+  COMPLETE
+}
+
+model Defi {
+  id        String     @id @default(cuid())
+  titre     String?
+  message   String?    @db.Text
+  statut    StatutDefi @default(OUVERT)
+  createdAt DateTime   @default(now())
+  expiresAt DateTime?
+
+  lanceParId  String
+  programmeId String
+  lancePar    User      @relation("defiCreateur", fields: [lanceParId], references: [id], onDelete: Cascade)
+  programme   Programme @relation(fields: [programmeId], references: [id], onDelete: Restrict)
+
+  participants DefiParticipant[]
+  commentaires DefiCommentaire[]
+
+  @@index([lanceParId])
+}
+
+model DefiParticipant {
+  id            String                @id @default(cuid())
+  statut        StatutDefiParticipant @default(EN_ATTENTE)
+  volumeTotalKg Float?
+  dureeSec      Int?
+  repsTotal     Int?
+  seanceId      String?
+  completedAt   DateTime?
+
+  defiId String
+  userId String
+  defi   Defi   @relation(fields: [defiId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([defiId, userId])
+  @@index([userId])
+}
+
+model DefiCommentaire {
+  id        String   @id @default(cuid())
+  message   String   @db.Text
+  createdAt DateTime @default(now())
+
+  defiId String
+  userId String
+  defi   Defi   @relation(fields: [defiId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([defiId])
+}
