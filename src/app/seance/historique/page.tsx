@@ -1,17 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  ChevronRight,
-  FileEdit,
-  Plus,
-  XCircle,
-} from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { Card, CardLabel } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+
+import { HistoriqueListe, type SeanceHistoriqueItem } from "./_client";
 
 export default async function HistoriqueSeancesPage() {
   const session = await auth();
@@ -19,7 +14,7 @@ export default async function HistoriqueSeancesPage() {
     redirect("/auth/login?callbackUrl=/seance/historique");
   }
 
-  const seances = await prisma.seance.findMany({
+  const rows = await prisma.seance.findMany({
     where: {
       userId: session.user.id,
       statut: { in: ["TERMINEE", "ANNULEE"] },
@@ -37,20 +32,15 @@ export default async function HistoriqueSeancesPage() {
     },
   });
 
-  // Group par mois (YYYY-MM)
-  const groups = new Map<
-    string,
-    { label: string; seances: typeof seances }
-  >();
-  for (const s of seances) {
-    const key = `${s.date.getFullYear()}-${String(s.date.getMonth() + 1).padStart(2, "0")}`;
-    const label = s.date.toLocaleDateString("fr-FR", {
-      month: "long",
-      year: "numeric",
-    });
-    if (!groups.has(key)) groups.set(key, { label, seances: [] });
-    groups.get(key)!.seances.push(s);
-  }
+  const seances: SeanceHistoriqueItem[] = rows.map((s) => ({
+    id: s.id,
+    dateISO: s.date.toISOString(),
+    statut: s.statut,
+    manuelle: s.manuelle,
+    volumeKg: s.volumeTotalKg,
+    nbSets: s._count.sets,
+    programmeNom: s.programme?.nom ?? null,
+  }));
 
   return (
     <div className="px-4 pt-5 pb-8">
@@ -89,63 +79,13 @@ export default async function HistoriqueSeancesPage() {
           </Link>
         </Card>
       ) : (
-        <div className="space-y-5">
-          {Array.from(groups.entries()).map(([key, group]) => (
-            <section key={key}>
-              <CardLabel className="mb-2 px-1">{group.label}</CardLabel>
-              <Card className="flex flex-col gap-1.5">
-                {group.seances.map((s) => (
-                  <Link
-                    key={s.id}
-                    href={`/seance/${s.id}`}
-                    className="flex items-center gap-2 rounded-lg bg-bg px-2.5 py-2 transition-colors hover:bg-bg/60"
-                  >
-                    {s.statut === "ANNULEE" ? (
-                      <XCircle className="size-3.5 shrink-0 text-danger" />
-                    ) : s.manuelle ? (
-                      <FileEdit className="size-3.5 shrink-0 text-muted-strong" />
-                    ) : (
-                      <CheckCircle2 className="size-3.5 shrink-0 text-success" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium">
-                        {s.programme?.nom ?? "Séance libre"}
-                        {s.manuelle && (
-                          <span className="ml-1 text-[9px] font-normal text-muted">
-                            (passée)
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-[10px] text-muted">
-                        {s.date.toLocaleDateString("fr-FR", {
-                          weekday: "short",
-                          day: "2-digit",
-                          month: "short",
-                        })}
-                        {s.statut === "TERMINEE" && s._count.sets > 0 && (
-                          <>
-                            {" · "}
-                            {s._count.sets} série{s._count.sets > 1 ? "s" : ""}
-                            {s.volumeTotalKg > 0 && (
-                              <> · {(s.volumeTotalKg / 1000).toFixed(1)}t</>
-                            )}
-                          </>
-                        )}
-                        {s.statut === "ANNULEE" && " · abandonnée"}
-                      </p>
-                    </div>
-                    <ChevronRight className="size-3.5 shrink-0 text-muted" />
-                  </Link>
-                ))}
-              </Card>
-            </section>
-          ))}
-          {seances.length === 200 && (
-            <p className="text-center text-[10px] text-muted">
-              200 séances affichées (les plus récentes)
-            </p>
-          )}
-        </div>
+        <HistoriqueListe seances={seances} />
+      )}
+
+      {seances.length === 200 && (
+        <p className="mt-4 text-center text-[10px] text-muted">
+          200 séances affichées (les plus récentes)
+        </p>
       )}
     </div>
   );

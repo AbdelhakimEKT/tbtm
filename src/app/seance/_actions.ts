@@ -613,19 +613,77 @@ export async function deleteSeance(
     return { ok: false, error: "Pas ta séance" };
   }
 
-  // Cascade : SeanceSet supprimés (onDelete: Cascade), PR détaché (SetNull).
-  // V1 : on ne rollback ni l'XP, ni le niveau, ni la streak — recalcul cross-séance
-  // trop fragile.
-  await prisma.seance.delete({ where: { id: seanceId } });
+  // Transaction : on supprime les PRs liés ET la séance ensemble. SeanceSet
+  // tombe en cascade automatique. V1 toujours : on ne rollback ni l'XP, ni le
+  // niveau, ni la streak (recalcul cross-séance trop fragile).
+  const [prDel] = await prisma.$transaction([
+    prisma.pR.deleteMany({ where: { seanceId } }),
+    prisma.seance.delete({ where: { id: seanceId } }),
+  ]);
 
   await logAudit({
     actorId: session.user.id,
     action: "DELETE",
     entityType: "SEANCE",
     entityId: seanceId,
+    metadata: { prsRemoved: prDel.count },
   });
 
   revalidatePath("/");
   revalidatePath("/stats");
+  revalidatePath("/seance/historique");
   return { ok: true };
+}
+
+export async function deleteSeances(
+  seanceIds: string[],
+): Promise<SeanceActionResult<{ deletedCount: number; prsRemoved: number }>> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Connecte-toi d'abord" };
+  if (seanceIds.length === 0) {
+    return { ok: false, error: "Aucune séance sélectionnée" };
+  }
+  if (seanceIds.length > 100) {
+    return { ok: false, error: "Max 100 séances à la fois" };
+  }
+
+  // Verrouille : on ne touche QUE les séances appartenant à l'user. On évite
+  // toute possibilité de delete cross-user via id forgé.
+  const owned = await prisma.seance.findMany({
+    where: {
+      id: { in: seanceIds },
+      userId: session.user.id,
+    },
+    select: { id: true },
+  });
+  const ownedIds = owned.map((s) => s.id);
+  if (ownedIds.length === 0) {
+    return { ok: false, error: "Aucune séance trouvée" };
+  }
+
+  const [prDel, seanceDel] = await prisma.$transaction([
+    prisma.pR.deleteMany({ where: { seanceId: { in: ownedIds } } }),
+    prisma.seance.deleteMany({ where: { id: { in: ownedIds } } }),
+  ]);
+
+  await logAudit({
+    actorId: session.user.id,
+    action: "DELETE",
+    entityType: "SEANCE",
+    entityId: `bulk:${ownedIds.length}`,
+    metadata: {
+      bulk: true,
+      seanceIds: ownedIds,
+      prsRemoved: prDel.count,
+    },
+  });
+
+  revalidatePath("/");
+  revalidatePath("/stats");
+  revalidatePath("/seance/historique");
+  return {
+    ok: true,
+    deletedCount: seanceDel.count,
+    prsRemoved: prDel.count,
+  };
 }

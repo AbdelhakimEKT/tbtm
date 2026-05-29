@@ -43,8 +43,8 @@ export function DeleteSeanceButton({ seanceId }: { seanceId: string }) {
   return (
     <Card className="mt-2 flex flex-col gap-2 border-danger/40 bg-danger/5">
       <p className="text-xs text-fg">
-        Supprimer cette séance ? L&apos;XP et la streak déjà gagnés ne sont pas
-        recalculés.
+        Supprimer cette séance ? Les PRs battus pendant cette séance partent
+        aussi. L&apos;XP et la streak déjà gagnés ne sont pas recalculés.
       </p>
       <div className="flex gap-2">
         <Button
