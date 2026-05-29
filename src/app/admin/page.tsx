@@ -46,8 +46,9 @@ export default async function AdminPage() {
       <section className="mt-5 space-y-2">
         <CardLabel className="px-1">Outils</CardLabel>
         <Card className="divide-y divide-card-border p-0">
+          <AdminLink href="/admin/users" label="Liste des users" />
+          <AdminLink href="/admin/activity" label="Activité (audit + créations)" />
           <AdminLink href="/exercices" label="Gérer les exercices" />
-          <AdminLink href="/admin/users" label="Liste des users (bientôt)" disabled />
           <AdminLink href="/admin/badges" label="Gérer les badges (bientôt)" disabled />
           <AdminLink href="/admin/recettes" label="Modérer les recettes (bientôt)" disabled />
         </Card>

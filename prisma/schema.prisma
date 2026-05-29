@@ -79,6 +79,24 @@ enum Role {
   ADMIN
 }
 
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum AuditEntityType {
+  USER
+  SEANCE
+  EXERCICE
+  PROGRAMME
+  RECETTE
+  INGREDIENT
+  NUTRITION_LOG
+  BADGE
+  DEFI
+}
+
 enum Sexe {
   HOMME
   FEMME
@@ -131,9 +149,11 @@ model User {
   seances          Seance[]
   prs              PR[]
   nutritionLogs    NutritionLog[]
+  nutritionFavoris NutritionFavori[]
   recettesCreees   Recette[]
   ingredientsCrees Ingredient[]
   userBadges       UserBadge[]
+  auditLogs        AuditLog[]
 
   // Amis (relation symétrique)
   amitiesEnvoyees Amitie[] @relation("amitieDe")
@@ -312,6 +332,7 @@ model Seance {
   statut            StatutSeance @default(EN_COURS)
   xpGagne           Int          @default(0)
   notes             String?      @db.Text
+  manuelle          Boolean      @default(false) // séance backfillée (pas d'XP, pas de streak, pas de PR)
 
   userId      String
   programmeId String?
@@ -335,6 +356,7 @@ model SeanceSet {
   isWarmup  Boolean @default(false)
   validated Boolean @default(false)
   restSec   Int? // récup réellement prise
+  notes     String? @db.VarChar(200) // note libre du set (ex: "4 strict + 2 trichées")
 
   seanceId   String
   exerciceId String
@@ -428,6 +450,7 @@ model Ingredient {
 
   recetteIngredients RecetteIngredient[]
   nutritionLogs      NutritionLog[]
+  favoris            NutritionFavori[]
 }
 
 enum CategorieRecette {
@@ -467,9 +490,26 @@ model Recette {
 
   ingredients   RecetteIngredient[]
   nutritionLogs NutritionLog[]
+  favoris       NutritionFavori[]
 
   @@index([createdById])
   @@index([visibilite])
+}
+
+model NutritionFavori {
+  id           String   @id @default(cuid())
+  userId       String
+  ingredientId String?
+  recetteId    String?
+  createdAt    DateTime @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredient Ingredient? @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  recette    Recette?    @relation(fields: [recetteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ingredientId])
+  @@unique([userId, recetteId])
+  @@index([userId])
 }
 
 model RecetteIngredient {
@@ -573,6 +613,28 @@ model DefiParticipant {
 
   @@unique([defiId, userId])
   @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// Audit log : trace des actions critiques (deletes, créations modérables, etc.)
+// On évite de spammer pour l'activité courante — on log surtout les actions
+// destructives ou les modifications admin.
+// ----------------------------------------------------------------------------
+
+model AuditLog {
+  id         String          @id @default(cuid())
+  actorId    String
+  action     AuditAction
+  entityType AuditEntityType
+  entityId   String
+  metadata   Json? // ex: { nom: "...", reason: "..." }
+  createdAt  DateTime        @default(now())
+
+  actor User @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([actorId, createdAt])
+  @@index([entityType, createdAt])
+  @@index([createdAt])
 }
 
 model DefiCommentaire {

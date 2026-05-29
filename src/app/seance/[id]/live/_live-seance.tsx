@@ -4,14 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from "next/navigation";
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Flag,
+  History,
   PauseOctagon,
   Plus,
   Star,
   Timer as TimerIcon,
   X,
+  StickyNote,
 } from "lucide-react";
 import type { Muscle } from "@prisma/client";
 
@@ -34,12 +37,26 @@ import {
   finishSeance,
   unvalidateSet,
   updateNoteDeForme,
+  updateSetNote,
   validateSet,
 } from "@/app/seance/_actions";
 
 // ----------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------
+
+export type HistorySet = {
+  poidsKg: number;
+  bwPlusKg: number | null;
+  reps: number;
+  rir: number | null;
+};
+
+export type HistorySession = {
+  seanceId: string;
+  dateISO: string;
+  sets: HistorySet[];
+};
 
 export type LiveExerciceData = {
   id: string; // programmeExercice.id
@@ -57,6 +74,7 @@ export type LiveExerciceData = {
     isLeste: boolean;
   };
   suggestion: Suggestion;
+  history: HistorySession[];
   validatedSets: ValidatedSet[];
 };
 
@@ -68,6 +86,7 @@ type ValidatedSet = {
   reps: number;
   rir: number | null;
   isBonus: boolean;
+  notes: string | null;
 };
 
 type Props = {
@@ -176,6 +195,7 @@ export function LiveSeance({
       reps: args.reps,
       rir: args.rir,
       isBonus: args.isBonus,
+      notes: null,
     };
 
     // Remplace si déjà présent à ce (ordre, isBonus), sinon ajoute
@@ -232,6 +252,30 @@ export function LiveSeance({
     await updateNoteDeForme(seanceId, n);
   }
 
+  async function handleUpdateSetNote(
+    exoId: string,
+    setId: string,
+    notes: string | null,
+  ) {
+    setError(null);
+    const exo = exercices.find((e) => e.exercice.id === exoId);
+    if (!exo) return;
+    const prevSets = exo.validatedSets;
+    const cleaned = notes && notes.trim().length > 0 ? notes.trim() : null;
+    // Optimistic
+    updateLocalValidated(
+      exoId,
+      prevSets.map((s) => (s.id === setId ? { ...s, notes: cleaned } : s)),
+    );
+    // Skip serveur pour les sets pas encore persistés (tmp-)
+    if (setId.startsWith("tmp-")) return;
+    const res = await updateSetNote(seanceId, setId, cleaned);
+    if (!res.ok) {
+      setError(res.error);
+      updateLocalValidated(exoId, prevSets);
+    }
+  }
+
   return (
     <div className="flex min-h-svh flex-col">
       <TopBar
@@ -260,6 +304,9 @@ export function LiveSeance({
                 onValidate={handleValidate}
                 onUnvalidate={(setId) =>
                   handleUnvalidate(currentExo.exercice.id, setId)
+                }
+                onUpdateNote={(setId, notes) =>
+                  handleUpdateSetNote(currentExo.exercice.id, setId, notes)
                 }
                 isLastExo={currentIdx === exercices.length - 1}
                 onGoNext={
@@ -377,6 +424,7 @@ function ExerciceBloc({
   exo,
   onValidate,
   onUnvalidate,
+  onUpdateNote,
   isLastExo,
   onGoNext,
   onFinishSeance,
@@ -392,6 +440,7 @@ function ExerciceBloc({
     isBonus: boolean;
   }) => Promise<void>;
   onUnvalidate: (setId: string) => void;
+  onUpdateNote: (setId: string, notes: string | null) => void;
   isLastExo: boolean;
   onGoNext?: () => void;
   onFinishSeance: () => void;
@@ -481,6 +530,10 @@ function ExerciceBloc({
           </p>
         )}
 
+      {exo.history.length > 0 && (
+        <HistoryPanel exo={exo} />
+      )}
+
       <Card className="mt-3 p-0 overflow-hidden">
         <ul>
           {plannedRows.map((row) => (
@@ -493,6 +546,7 @@ function ExerciceBloc({
               isActive={!row.done && row.ordre === firstActive?.ordre}
               onValidate={onValidate}
               onUnvalidate={onUnvalidate}
+              onUpdateNote={onUpdateNote}
             />
           ))}
           {bonusRows.map((row) => (
@@ -505,6 +559,7 @@ function ExerciceBloc({
               isActive={false}
               onValidate={onValidate}
               onUnvalidate={onUnvalidate}
+              onUpdateNote={onUpdateNote}
             />
           ))}
           {/* Ligne "Ajouter une série bonus" */}
@@ -545,6 +600,80 @@ function ExerciceBloc({
         </div>
       )}
     </section>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Historique : panneau dépliable avec les N dernières séances sur cet exo
+// ----------------------------------------------------------------------------
+
+function HistoryPanel({ exo }: { exo: LiveExerciceData }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1 text-[11px] text-accent-soft hover:underline"
+        aria-expanded={open}
+      >
+        <History className="size-3" />
+        Historique ({exo.history.length})
+        <ChevronDown
+          className={cn(
+            "size-3 transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+
+      {open && (
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {exo.history.map((session) => {
+            const d = new Date(session.dateISO);
+            const dateLabel = d.toLocaleDateString("fr-FR", {
+              day: "2-digit",
+              month: "short",
+            });
+            return (
+              <li
+                key={session.seanceId}
+                className="rounded-lg bg-bg/60 px-2.5 py-2 text-[11px]"
+              >
+                <p className="mb-1 text-[10px] uppercase tracking-wide text-muted">
+                  {dateLabel}
+                </p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {session.sets.map((s, i) => {
+                    const charge = exo.exercice.isLeste
+                      ? s.bwPlusKg != null
+                        ? `BW+${s.bwPlusKg}`
+                        : "BW"
+                      : `${s.poidsKg}kg`;
+                    return (
+                      <span
+                        key={i}
+                        className="inline-flex items-baseline gap-0.5 rounded bg-card px-1.5 py-0.5"
+                      >
+                        <span className="font-medium text-fg">{charge}</span>
+                        <span className="text-muted">×</span>
+                        <span className="font-medium text-fg">{s.reps}</span>
+                        {s.rir != null && (
+                          <span className="ml-1 text-[9px] text-muted">
+                            RIR {s.rir}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })}
+                </ul>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -590,6 +719,7 @@ function SetRow({
   isActive,
   onValidate,
   onUnvalidate,
+  onUpdateNote,
 }: {
   exo: LiveExerciceData;
   ordre: number;
@@ -606,7 +736,15 @@ function SetRow({
     isBonus: boolean;
   }) => Promise<void>;
   onUnvalidate: (setId: string) => void;
+  onUpdateNote: (setId: string, notes: string | null) => void;
 }) {
+  const [noteEditing, setNoteEditing] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(done?.notes ?? "");
+
+  // Resync draft si la note change ailleurs (ex: serveur, autre tab)
+  useEffect(() => {
+    if (!noteEditing) setNoteDraft(done?.notes ?? "");
+  }, [done?.notes, noteEditing]);
   const defaultPoids = exo.exercice.isLeste
     ? String(exo.suggestion.bwPlusKg ?? exo.bwPlusKg ?? 0)
     : String(exo.suggestion.poidsKg ?? exo.poidsCible ?? 0);
@@ -708,72 +846,154 @@ function SetRow({
   return (
     <li
       className={cn(
-        "grid grid-cols-[32px_1fr_1fr_50px_32px] items-center gap-2 border-b border-card-border px-3 py-2 last:border-b-0 transition-colors",
+        "border-b border-card-border last:border-b-0 transition-colors",
         done && "bg-success/5",
       )}
     >
-      <span className="text-xs font-medium text-muted">
-        {isBonus ? "B" : ""}
-        {ordre}
-      </span>
+      <div
+        className={cn(
+          "grid items-center gap-2 px-3 py-2",
+          done
+            ? "grid-cols-[32px_1fr_1fr_50px_22px_32px]"
+            : "grid-cols-[32px_1fr_1fr_50px_32px]",
+        )}
+      >
+        <span className="text-xs font-medium text-muted">
+          {isBonus ? "B" : ""}
+          {ordre}
+        </span>
 
-      {done ? (
-        <>
-          <span className="text-sm">
-            {exo.exercice.isLeste
-              ? done.bwPlusKg != null
-                ? `BW+${done.bwPlusKg}`
-                : "BW"
-              : `${done.poidsKg}kg`}
-          </span>
-          <span className="text-sm">{done.reps}</span>
-          <span className="text-xs text-muted">
-            {done.rir != null ? done.rir : "—"}
-          </span>
+        {done ? (
+          <>
+            <span className="text-sm">
+              {exo.exercice.isLeste
+                ? done.bwPlusKg != null
+                  ? `BW+${done.bwPlusKg}`
+                  : "BW"
+                : `${done.poidsKg}kg`}
+            </span>
+            <span className="text-sm">{done.reps}</span>
+            <span className="text-xs text-muted">
+              {done.rir != null ? done.rir : "—"}
+            </span>
+            <button
+              type="button"
+              aria-label={done.notes ? "Voir/éditer la note" : "Ajouter une note"}
+              onClick={() => setNoteEditing((o) => !o)}
+              className="grid size-5 place-items-center justify-self-center rounded-full text-muted hover:text-fg"
+            >
+              <span
+                className={cn(
+                  "block size-1.5 rounded-full transition-colors",
+                  done.notes
+                    ? "bg-accent-soft"
+                    : "bg-muted/40 group-hover:bg-muted",
+                )}
+              />
+            </button>
+            <button
+              type="button"
+              aria-label="Annuler cette série"
+              onClick={() => onUnvalidate(done.id)}
+              className="grid size-7 place-items-center justify-self-end rounded-full bg-success/20 text-success hover:bg-danger/20 hover:text-danger"
+            >
+              <Check className="size-3.5" />
+            </button>
+          </>
+        ) : (
+          <>
+            <SetInput
+              value={poids}
+              onChange={setPoids}
+              placeholder={defaultPoids}
+              unit={exo.exercice.isLeste ? "+kg" : "kg"}
+              active={false}
+            />
+            <SetInput
+              value={reps}
+              onChange={setReps}
+              placeholder={String(exo.repsCibles)}
+              active={false}
+            />
+            <SetInput
+              value={rir}
+              onChange={setRir}
+              placeholder="—"
+              small
+              active={false}
+            />
+            <button
+              type="button"
+              aria-label="Valider cette série"
+              onClick={handleValidate}
+              disabled={pending}
+              className={cn(
+                "grid size-7 place-items-center justify-self-end rounded-full border border-card-border text-muted hover:border-accent-border hover:text-accent-soft transition-colors",
+                pending && "opacity-50",
+              )}
+            >
+              <Check className="size-3.5" />
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Affichage note (collapsed) : tap pour éditer */}
+      {done && done.notes && !noteEditing && (
+        <button
+          type="button"
+          onClick={() => setNoteEditing(true)}
+          className="block w-full px-3 pb-2 text-left text-[10px] italic text-muted-strong hover:text-fg"
+        >
+          {done.notes}
+        </button>
+      )}
+
+      {/* Editor inline : input court + sauvegarde/annule */}
+      {done && noteEditing && (
+        <div className="flex items-center gap-1.5 px-3 pb-2">
+          <StickyNote className="size-3 shrink-0 text-muted" />
+          <input
+            type="text"
+            autoFocus
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value.slice(0, 200))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onUpdateNote(done.id, noteDraft);
+                setNoteEditing(false);
+              } else if (e.key === "Escape") {
+                setNoteDraft(done.notes ?? "");
+                setNoteEditing(false);
+              }
+            }}
+            placeholder="ex: 4 strict + 2 trichées"
+            className="h-7 flex-1 rounded-md border border-card-border bg-bg/60 px-2 text-[11px] outline-none focus:border-accent"
+          />
           <button
             type="button"
-            aria-label="Annuler cette série"
-            onClick={() => onUnvalidate(done.id)}
-            className="grid size-7 place-items-center justify-self-end rounded-full bg-success/20 text-success hover:bg-danger/20 hover:text-danger"
+            aria-label="Enregistrer la note"
+            onClick={() => {
+              onUpdateNote(done.id, noteDraft);
+              setNoteEditing(false);
+            }}
+            className="grid size-6 shrink-0 place-items-center rounded-full bg-accent text-white"
           >
-            <Check className="size-3.5" />
+            <Check className="size-3" />
           </button>
-        </>
-      ) : (
-        <>
-          <SetInput
-            value={poids}
-            onChange={setPoids}
-            placeholder={defaultPoids}
-            unit={exo.exercice.isLeste ? "+kg" : "kg"}
-            active={false}
-          />
-          <SetInput
-            value={reps}
-            onChange={setReps}
-            placeholder={String(exo.repsCibles)}
-            active={false}
-          />
-          <SetInput
-            value={rir}
-            onChange={setRir}
-            placeholder="—"
-            small
-            active={false}
-          />
           <button
             type="button"
-            aria-label="Valider cette série"
-            onClick={handleValidate}
-            disabled={pending}
-            className={cn(
-              "grid size-7 place-items-center justify-self-end rounded-full border border-card-border text-muted hover:border-accent-border hover:text-accent-soft transition-colors",
-              pending && "opacity-50",
-            )}
+            aria-label="Annuler"
+            onClick={() => {
+              setNoteDraft(done.notes ?? "");
+              setNoteEditing(false);
+            }}
+            className="grid size-6 shrink-0 place-items-center rounded-full text-muted hover:text-fg"
           >
-            <Check className="size-3.5" />
+            <X className="size-3" />
           </button>
-        </>
+        </div>
       )}
     </li>
   );
@@ -865,6 +1085,7 @@ function AddBonusRow({
         setOpen(false);
       }}
       onUnvalidate={() => setOpen(false)}
+      onUpdateNote={() => {}}
     />
   );
 }
@@ -940,56 +1161,89 @@ function useRecupTimer() {
   const [active, setActive] = useState(false);
   const [target, setTarget] = useState(0);
   const [remaining, setRemaining] = useState(0);
+  // endTsRef = horodatage absolu de fin (ms). On évite les setInterval qui
+  // décrémentent : iOS/Android suspendent les timers JS en background, donc
+  // un compteur qui décrémente de 1/s gèle quand l'app sort. Avec un timestamp
+  // de fin, on recalcule le restant à chaque tick et au retour au premier plan.
+  const endTsRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const playedRef = useRef(false);
 
-  const stop = useCallback(() => {
-    setActive(false);
+  const clearTick = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
   }, []);
 
-  const start = useCallback((seconds: number) => {
-    setTarget(seconds);
-    setRemaining(seconds);
-    setActive(seconds > 0);
-    playedRef.current = false;
-  }, []);
+  const stop = useCallback(() => {
+    setActive(false);
+    clearTick();
+  }, [clearTick]);
+
+  const start = useCallback(
+    (seconds: number) => {
+      if (seconds <= 0) {
+        stop();
+        setTarget(0);
+        setRemaining(0);
+        return;
+      }
+      endTsRef.current = Date.now() + seconds * 1000;
+      setTarget(seconds);
+      setRemaining(seconds);
+      playedRef.current = false;
+      setActive(true);
+    },
+    [stop],
+  );
 
   const add = useCallback((seconds: number) => {
-    setRemaining((r) => Math.max(0, r + seconds));
+    endTsRef.current += seconds * 1000;
     setTarget((t) => t + seconds);
+    setRemaining((r) => Math.max(0, r + seconds));
   }, []);
 
   useEffect(() => {
     if (!active) return;
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(() => {
-      setRemaining((r) => {
-        if (r <= 1) {
-          if (!playedRef.current) {
-            playedRef.current = true;
-            playEndBeep();
-            try {
-              navigator.vibrate?.([200, 80, 200]);
-            } catch {
-              // ignore
-            }
+
+    function tick() {
+      const r = Math.max(
+        0,
+        Math.ceil((endTsRef.current - Date.now()) / 1000),
+      );
+      setRemaining(r);
+      if (r === 0) {
+        // On joue le beep / vibre seulement si on est au premier plan ET qu'on
+        // n'a pas déjà joué : sinon on spamme au retour en background.
+        if (!playedRef.current && document.visibilityState === "visible") {
+          playedRef.current = true;
+          playEndBeep();
+          try {
+            navigator.vibrate?.([200, 80, 200]);
+          } catch {
+            // ignore
           }
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          intervalRef.current = null;
-          setActive(false);
-          return 0;
+        } else {
+          playedRef.current = true;
         }
-        return r - 1;
-      });
-    }, 1000);
+        clearTick();
+        setActive(false);
+      }
+    }
+
+    function onVisibility() {
+      if (document.visibilityState === "visible") tick();
+    }
+
+    tick();
+    intervalRef.current = setInterval(tick, 500);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      clearTick();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [active]);
+  }, [active, clearTick]);
 
   return { active, target, remaining, start, stop, add };
 }
@@ -1153,7 +1407,7 @@ function ConfirmFinish({
       <Card highlighted className="flex flex-col gap-3">
         <Flag className="mx-auto size-8 text-accent-soft" />
         <h3 className="text-center text-base font-semibold">
-          {totalValidated === 0 ? "Aucune série validée" : "GG EZ ?"}
+          {totalValidated === 0 ? "Aucune série validée" : "On clôture ?"}
         </h3>
         <p className="text-center text-xs text-muted-strong">
           {totalValidated === 0
@@ -1215,8 +1469,37 @@ function Modal({ children }: { children: React.ReactNode }) {
 function useDurationCounter(startMs: number): number {
   const [now, setNow] = useState<number>(Date.now);
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | null = null;
+
+    function tick() {
+      setNow(Date.now());
+    }
+    function startTicking() {
+      tick();
+      if (id) clearInterval(id);
+      id = setInterval(tick, 1000);
+    }
+    function stopTicking() {
+      if (id) {
+        clearInterval(id);
+        id = null;
+      }
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        startTicking();
+      } else {
+        // Pause le tick en background pour économiser, on resync au retour.
+        stopTicking();
+      }
+    }
+
+    startTicking();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stopTicking();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
   return Math.max(0, Math.floor((now - startMs) / 1000));
 }

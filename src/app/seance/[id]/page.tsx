@@ -25,6 +25,7 @@ import { BadgeIcon } from "@/components/badge-icon";
 import { BADGE_RARETE_LABEL } from "@/lib/labels";
 
 import { ShareSeanceButton } from "./_share-button";
+import { DeleteSeanceButton } from "./_delete-button";
 
 type Params = Promise<{ id: string }>;
 
@@ -58,6 +59,7 @@ export default async function SeanceRecapPage({ params }: { params: Params }) {
           reps: true,
           rir: true,
           isBonus: true,
+          notes: true,
           exercice: {
             select: { id: true, nom: true, muscles: true, isLeste: true },
           },
@@ -212,12 +214,12 @@ export default async function SeanceRecapPage({ params }: { params: Params }) {
           {isCancelled
             ? "Séance abandonnée"
             : seance.prs.length >= 3
-              ? "Triple monstre 🔥"
+              ? `Séance record · ${seance.prs.length} PRs 🔥`
               : seance.prs.length === 2
-                ? "Double monstre"
+                ? "Double PR 🔥"
                 : seance.prs.length === 1
-                  ? "Monstre"
-                  : "GG EZ"}
+                  ? "Nouveau PR 🏆"
+                  : "GG, séance bouclée"}
         </h1>
         <p className="mt-1 text-[11px] text-muted">
           {seance.programme?.nom ?? "Séance libre"} ·{" "}
@@ -459,27 +461,34 @@ export default async function SeanceRecapPage({ params }: { params: Params }) {
                     {g.sets.map((s) => (
                       <li
                         key={s.id}
-                        className="flex items-center justify-between rounded-md bg-bg px-2.5 py-1.5 text-[11px]"
+                        className="rounded-md bg-bg px-2.5 py-1.5 text-[11px]"
                       >
-                        <span className="text-muted">
-                          {s.isBonus ? "Bonus" : `Série ${s.ordre}`}
-                        </span>
-                        <span>
-                          <span className="font-semibold">
-                            {g.exercice.isLeste
-                              ? s.bwPlusKg != null
-                                ? `BW+${s.bwPlusKg}`
-                                : "BW"
-                              : `${s.poidsKg}kg`}
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted">
+                            {s.isBonus ? "Bonus" : `Série ${s.ordre}`}
                           </span>
-                          <span className="mx-1 text-muted">×</span>
-                          <span className="font-semibold">{s.reps}</span>
-                          {s.rir != null && (
-                            <span className="ml-2 text-muted">
-                              RIR {s.rir}
+                          <span>
+                            <span className="font-semibold">
+                              {g.exercice.isLeste
+                                ? s.bwPlusKg != null
+                                  ? `BW+${s.bwPlusKg}`
+                                  : "BW"
+                                : `${s.poidsKg}kg`}
                             </span>
-                          )}
-                        </span>
+                            <span className="mx-1 text-muted">×</span>
+                            <span className="font-semibold">{s.reps}</span>
+                            {s.rir != null && (
+                              <span className="ml-2 text-muted">
+                                RIR {s.rir}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        {s.notes && (
+                          <p className="mt-0.5 text-[10px] italic text-muted-strong">
+                            {s.notes}
+                          </p>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -504,6 +513,9 @@ export default async function SeanceRecapPage({ params }: { params: Params }) {
           >
             voir le programme {seance.programme.nom} →
           </Link>
+        )}
+        {seance.userId === session.user.id && (
+          <DeleteSeanceButton seanceId={seance.id} />
         )}
       </div>
     </div>
@@ -565,13 +577,13 @@ function buildShareText(args: {
   if (args.nbPRs > 0) {
     parts.push(
       args.nbPRs >= 3
-        ? `Triple monstre 🔥 ${args.nbPRs} PRs claqués`
+        ? `🔥 ${args.nbPRs} nouveaux PRs en une séance`
         : args.nbPRs === 2
-          ? "Double monstre · 2 PRs claqués"
-          : "Monstre · 1 PR claqué",
+          ? "🔥 2 nouveaux PRs"
+          : "🏆 Nouveau PR",
     );
   } else {
-    parts.push("GG EZ");
+    parts.push("GG, séance bouclée");
   }
   if (args.programmeNom) parts.push(`Programme : ${args.programmeNom}`);
   parts.push(`Durée : ${formatDuree(args.dureeSec)}`);

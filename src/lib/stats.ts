@@ -287,3 +287,139 @@ export async function buildStats(args: {
     exoProgression,
   };
 }
+
+// ----------------------------------------------------------------------------
+// Home dashboard — stats calendaires (mois en cours + semaine en cours + PRs)
+// ----------------------------------------------------------------------------
+
+export type HomeDashboard = {
+  volumeKgMonth: number;
+  volumeDeltaPct: number | null;
+  seancesMonth: number;
+  seancesDelta: number | null;
+  weekVolumesKg: number[];
+  recentPRs: { exercice: string; poids: string; delta?: string }[];
+};
+
+export async function buildHomeDashboard(userId: string): Promise<HomeDashboard> {
+  const now = new Date();
+  const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  // Semaine en cours : lundi 00:00 → lundi suivant 00:00 (lundi = index 0)
+  const dayOfWeek = now.getDay(); // 0 = dimanche
+  const daysFromMonday = (dayOfWeek + 6) % 7;
+  const startOfWeek = new Date(now);
+  startOfWeek.setHours(0, 0, 0, 0);
+  startOfWeek.setDate(startOfWeek.getDate() - daysFromMonday);
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(endOfWeek.getDate() + 7);
+
+  const [thisMonthSeances, lastMonthSeances, weekSeances, recentPRs] = await Promise.all([
+    prisma.seance.findMany({
+      where: {
+        userId,
+        statut: "TERMINEE",
+        date: { gte: startOfThisMonth, lt: startOfNextMonth },
+      },
+      select: { volumeTotalKg: true },
+    }),
+    prisma.seance.findMany({
+      where: {
+        userId,
+        statut: "TERMINEE",
+        date: { gte: startOfLastMonth, lt: startOfThisMonth },
+      },
+      select: { volumeTotalKg: true },
+    }),
+    prisma.seance.findMany({
+      where: {
+        userId,
+        statut: "TERMINEE",
+        date: { gte: startOfWeek, lt: endOfWeek },
+      },
+      select: { date: true, volumeTotalKg: true },
+    }),
+    // On fetch 20 PRs récents pour pouvoir dédup par exo et calculer un delta
+    // vs le PR précédent du même exo.
+    prisma.pR.findMany({
+      where: { userId },
+      orderBy: { date: "desc" },
+      take: 20,
+      select: {
+        poidsKg: true,
+        bwPlusKg: true,
+        reps: true,
+        oneRmKg: true,
+        date: true,
+        exerciceId: true,
+        exercice: { select: { nom: true, isLeste: true } },
+      },
+    }),
+  ]);
+
+  const volumeKgMonth = thisMonthSeances.reduce((acc, s) => acc + s.volumeTotalKg, 0);
+  const volumeKgLastMonth = lastMonthSeances.reduce((acc, s) => acc + s.volumeTotalKg, 0);
+  const volumeDeltaPct =
+    volumeKgLastMonth > 0
+      ? Math.round(((volumeKgMonth - volumeKgLastMonth) / volumeKgLastMonth) * 100)
+      : null;
+
+  const seancesMonth = thisMonthSeances.length;
+  const seancesLastMonth = lastMonthSeances.length;
+  const seancesDelta = seancesLastMonth > 0 ? seancesMonth - seancesLastMonth : null;
+
+  const weekVolumesKg = [0, 0, 0, 0, 0, 0, 0];
+  for (const s of weekSeances) {
+    const idx = (s.date.getDay() + 6) % 7;
+    weekVolumesKg[idx] += s.volumeTotalKg;
+  }
+
+  // Garde le PR le plus récent par exo, puis calcule le delta vs le précédent
+  // PR du même exo s'il existe (dans la fenêtre des 20 récents).
+  const seen = new Set<string>();
+  const topByExo: typeof recentPRs = [];
+  const previousByExo = new Map<string, (typeof recentPRs)[number]>();
+  for (const pr of recentPRs) {
+    if (!seen.has(pr.exerciceId)) {
+      seen.add(pr.exerciceId);
+      topByExo.push(pr);
+    } else if (!previousByExo.has(pr.exerciceId)) {
+      previousByExo.set(pr.exerciceId, pr);
+    }
+    if (topByExo.length >= 3 && previousByExo.size >= topByExo.length) break;
+  }
+
+  const formatPoids = (pr: (typeof recentPRs)[number]) => {
+    if (pr.exercice.isLeste) {
+      const add = pr.bwPlusKg ?? 0;
+      const suffix = `× ${pr.reps}`;
+      return add > 0 ? `BW+${add}kg ${suffix}` : `BW ${suffix}`;
+    }
+    return `${pr.poidsKg}kg × ${pr.reps}`;
+  };
+
+  const formattedRecentPRs = topByExo.slice(0, 3).map((pr) => {
+    const prev = previousByExo.get(pr.exerciceId);
+    let delta: string | undefined;
+    if (prev && pr.oneRmKg > prev.oneRmKg) {
+      const diff = Math.round((pr.oneRmKg - prev.oneRmKg) * 10) / 10;
+      delta = `+${diff}kg`;
+    }
+    return {
+      exercice: pr.exercice.nom,
+      poids: formatPoids(pr),
+      delta,
+    };
+  });
+
+  return {
+    volumeKgMonth,
+    volumeDeltaPct,
+    seancesMonth,
+    seancesDelta,
+    weekVolumesKg,
+    recentPRs: formattedRecentPRs,
+  };
+}

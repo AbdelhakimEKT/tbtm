@@ -1,10 +1,9 @@
 import Link from "next/link";
 import {
   ArrowLeft,
-  Construction,
+  Clock,
   Dumbbell,
   Library,
-  Zap,
 } from "lucide-react";
 
 import { auth } from "@/lib/auth";
@@ -39,15 +38,28 @@ export default async function NouvelleSeancePage({
         </Link>
       </header>
 
-      <Card className="flex items-start gap-3 border-warning/40 bg-warning/5">
-        <Construction className="size-5 shrink-0 text-warning" />
-        <div className="flex-1">
-          <p className="text-sm font-medium">Phase 4 en chantier</p>
-          <p className="mt-1 text-[11px] text-muted-strong">
-            Le mode séance live (timer de récup, validation des sets, suggestion auto de charge, mini-player Spotify) arrive bientôt. En attendant tu peux préparer tes programmes et explorer les exos.
-          </p>
-        </div>
-      </Card>
+      <section className="mb-4">
+        <h1 className="text-xl font-semibold">Nouvelle séance</h1>
+        <p className="mt-1 text-[11px] text-muted-strong">
+          Lance une séance live depuis un de tes programmes, ou ajoute une
+          séance passée pour backfiller ton historique.
+        </p>
+      </section>
+
+      <Link href="/seance/manuelle">
+        <Card className="flex items-center gap-3 transition-colors hover:border-accent-border">
+          <div className="grid size-10 place-items-center rounded-xl bg-accent-bg text-accent-soft">
+            <Clock className="size-5" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium">Ajouter une séance passée</p>
+            <CardLabel className="mt-0.5 normal-case tracking-normal">
+              Backfill (sans XP / streak / PR)
+            </CardLabel>
+          </div>
+          <span className="text-[10px] text-muted">→</span>
+        </Card>
+      </Link>
 
       {programme && (
         <section className="mt-4">
@@ -85,7 +97,7 @@ export default async function NouvelleSeancePage({
       )}
 
       <section className="mt-5 space-y-2">
-        <CardLabel className="px-1">En attendant tu peux</CardLabel>
+        <CardLabel className="px-1">Autres options</CardLabel>
         <Link href="/programmes">
           <Card className="flex items-center gap-3 transition-colors hover:border-accent-border">
             <div className="grid size-10 place-items-center rounded-xl bg-accent-bg text-accent-soft">
@@ -115,18 +127,6 @@ export default async function NouvelleSeancePage({
             <span className="text-[10px] text-muted">→</span>
           </Card>
         </Link>
-
-        <Card className="flex items-center gap-3 opacity-50">
-          <div className="grid size-10 place-items-center rounded-xl bg-bar-idle text-muted">
-            <Zap className="size-5" />
-          </div>
-          <div className="flex-1">
-            <p className="text-sm font-medium">Lancer une séance live</p>
-            <CardLabel className="mt-0.5 normal-case tracking-normal">
-              Bientôt — phase 4
-            </CardLabel>
-          </div>
-        </Card>
       </section>
     </div>
   );

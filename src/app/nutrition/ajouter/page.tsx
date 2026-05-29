@@ -56,6 +56,33 @@ export default async function AjouterAlimentPage({
     },
   });
 
+  // Mes favoris (juste les IDs, on récupère les détails plus bas)
+  const favorisRaw = await prisma.nutritionFavori.findMany({
+    where: { userId: session.user.id },
+    orderBy: { createdAt: "desc" },
+    select: {
+      ingredient: {
+        select: {
+          id: true,
+          nom: true,
+          photo: true,
+          caloriesP100: true,
+          proteinesP100: true,
+          glucidesP100: true,
+          lipidesP100: true,
+        },
+      },
+      recetteId: true,
+    },
+  });
+  const favoriIngredients = favorisRaw
+    .map((f) => f.ingredient)
+    .filter((i): i is NonNullable<typeof i> => i !== null);
+  const favoriIngredientIds = favoriIngredients.map((i) => i.id);
+  const favoriRecetteIds = favorisRaw
+    .map((f) => f.recetteId)
+    .filter((id): id is string => id !== null);
+
   // Mes recettes (avec ingrédients pour calculer les macros par portion)
   const recettesRaw = await prisma.recette.findMany({
     where: {
@@ -192,6 +219,9 @@ export default async function AjouterAlimentPage({
           date={date}
           recents={recents}
           recettes={recettes}
+          favoriIngredients={favoriIngredients}
+          favoriIngredientIds={favoriIngredientIds}
+          favoriRecetteIds={favoriRecetteIds}
         />
       </div>
     </div>

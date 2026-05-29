@@ -2,7 +2,11 @@ import { notFound, redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSuggestionForExercice, type Suggestion } from "@/lib/seance";
+import {
+  getRecentSessionsForExercice,
+  getSuggestionForExercice,
+  type Suggestion,
+} from "@/lib/seance";
 
 import { LiveSeance, type LiveExerciceData } from "./_live-seance";
 
@@ -62,6 +66,7 @@ export default async function LiveSeancePage({ params }: { params: Params }) {
           reps: true,
           rir: true,
           isBonus: true,
+          notes: true,
         },
       },
     },
@@ -74,17 +79,26 @@ export default async function LiveSeancePage({ params }: { params: Params }) {
     redirect("/programmes");
   }
 
-  // Calcule la suggestion auto pour chaque exo (server-side)
+  // Calcule la suggestion auto + l'historique récent pour chaque exo (server-side)
+  const userId = session.user.id;
   const exercicesWithSuggestion: LiveExerciceData[] = await Promise.all(
     seance.programme.exercices.map(async (pe) => {
-      const suggestion: Suggestion = await getSuggestionForExercice({
-        userId: session.user.id,
-        exerciceId: pe.exercice.id,
-        isLeste: pe.exercice.isLeste,
-        plannedPoidsKg: pe.poidsCible,
-        plannedBwPlusKg: pe.bwPlusKg,
-        plannedReps: pe.repsCibles,
-      });
+      const [suggestion, history]: [Suggestion, Awaited<ReturnType<typeof getRecentSessionsForExercice>>] = await Promise.all([
+        getSuggestionForExercice({
+          userId,
+          exerciceId: pe.exercice.id,
+          isLeste: pe.exercice.isLeste,
+          plannedPoidsKg: pe.poidsCible,
+          plannedBwPlusKg: pe.bwPlusKg,
+          plannedReps: pe.repsCibles,
+        }),
+        getRecentSessionsForExercice({
+          userId,
+          exerciceId: pe.exercice.id,
+          excludeSeanceId: seance.id,
+          limit: 3,
+        }),
+      ]);
       return {
         id: pe.id,
         ordre: pe.ordre,
@@ -96,6 +110,11 @@ export default async function LiveSeancePage({ params }: { params: Params }) {
         notes: pe.notes,
         exercice: pe.exercice,
         suggestion,
+        history: history.map((h) => ({
+          seanceId: h.seanceId,
+          dateISO: h.date.toISOString(),
+          sets: h.sets,
+        })),
         validatedSets: seance.sets
           .filter((s) => s.exerciceId === pe.exercice.id)
           .map((s) => ({
@@ -106,6 +125,7 @@ export default async function LiveSeancePage({ params }: { params: Params }) {
             reps: s.reps,
             rir: s.rir,
             isBonus: s.isBonus,
+            notes: s.notes,
           })),
       };
     }),

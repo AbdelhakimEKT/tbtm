@@ -280,3 +280,71 @@ export async function deleteNutritionLog(
 export async function getPortionGrammes() {
   return PORTION_GRAMMES;
 }
+
+// ----------------------------------------------------------------------------
+// Favoris (ingrédient OU recette, toggle simple)
+// ----------------------------------------------------------------------------
+
+export async function toggleFavoriIngredient(
+  ingredientId: string,
+): Promise<{ ok: true; favoris: boolean } | { ok: false; error: string }> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Connecte-toi d'abord" };
+
+  const existing = await prisma.nutritionFavori.findUnique({
+    where: {
+      userId_ingredientId: {
+        userId: session.user.id,
+        ingredientId,
+      },
+    },
+    select: { id: true },
+  });
+
+  if (existing) {
+    await prisma.nutritionFavori.delete({ where: { id: existing.id } });
+    revalidatePath("/nutrition/ajouter");
+    return { ok: true, favoris: false };
+  }
+
+  await prisma.nutritionFavori.create({
+    data: {
+      userId: session.user.id,
+      ingredientId,
+    },
+  });
+  revalidatePath("/nutrition/ajouter");
+  return { ok: true, favoris: true };
+}
+
+export async function toggleFavoriRecette(
+  recetteId: string,
+): Promise<{ ok: true; favoris: boolean } | { ok: false; error: string }> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Connecte-toi d'abord" };
+
+  const existing = await prisma.nutritionFavori.findUnique({
+    where: {
+      userId_recetteId: {
+        userId: session.user.id,
+        recetteId,
+      },
+    },
+    select: { id: true },
+  });
+
+  if (existing) {
+    await prisma.nutritionFavori.delete({ where: { id: existing.id } });
+    revalidatePath("/nutrition/ajouter");
+    return { ok: true, favoris: false };
+  }
+
+  await prisma.nutritionFavori.create({
+    data: {
+      userId: session.user.id,
+      recetteId,
+    },
+  });
+  revalidatePath("/nutrition/ajouter");
+  return { ok: true, favoris: true };
+}

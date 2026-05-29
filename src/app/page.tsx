@@ -3,6 +3,7 @@ import { Flame, TrendingUp, Trophy } from "lucide-react";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buildHomeDashboard, type HomeDashboard } from "@/lib/stats";
 import { Avatar } from "@/components/ui/avatar";
 import { Card, CardLabel } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -21,22 +22,22 @@ export default async function HomePage() {
 
   // Requêtes en parallèle (Promise.all) au lieu de séquentiel : moitié de la
   // latence cross-region Vercel→Supabase.
-  const [user, programmesPourRotation] = await Promise.all([
+  const [user, programmesPourRotation, dashboard] = await Promise.all([
     safeGetUser(session.user.id),
     safeGetProgrammesForRotation(session.user.id),
+    safeGetHomeDashboard(session.user.id),
   ]);
   const userPseudo = user?.pseudo ?? session.user.pseudo ?? "Toi";
   const niveau = user?.niveau ?? 1;
   const streak = user?.streakActuel ?? 0;
   const xpPct = computeXpProgress(user?.xp ?? 0, niveau);
 
-  // Phase 5+ : ces données seront branchées
-  const volumeCeMois = 0;
-  const volumeDeltaPct = null as null | number;
-  const seancesCeMois = 0;
-  const seancesDelta = null as null | number;
-  const semaineVolumes: number[] = [0, 0, 0, 0, 0, 0, 0];
-  const derniersPrs: { exercice: string; poids: string; delta?: string }[] = [];
+  const volumeCeMois = dashboard.volumeKgMonth;
+  const volumeDeltaPct = dashboard.volumeDeltaPct;
+  const seancesCeMois = dashboard.seancesMonth;
+  const seancesDelta = dashboard.seancesDelta;
+  const semaineVolumes = dashboard.weekVolumesKg;
+  const derniersPrs = dashboard.recentPRs;
 
   return (
     <div className="px-4 pt-5 pb-6">
@@ -89,7 +90,7 @@ export default async function HomePage() {
             <CardLabel>Cette semaine</CardLabel>
             <span className="text-[10px] text-muted">
               <TrendingUp className="-mt-0.5 mr-0.5 inline size-3" />
-              {semaineVolumes.reduce((a, b) => a + b, 0)} kg
+              {Math.round(semaineVolumes.reduce((a, b) => a + b, 0))} kg
             </span>
           </div>
           <div className="mt-2 flex h-10 items-end gap-1">
@@ -123,7 +124,7 @@ export default async function HomePage() {
             <Card className="flex items-center gap-3 py-4">
               <Trophy className="size-6 text-muted" />
               <p className="flex-1 text-xs text-muted-strong">
-                Aucun PR pour l&apos;instant. Lance une séance, monstre.
+                Aucun PR pour l&apos;instant. Lance une séance pour en battre un.
               </p>
             </Card>
           ) : (
@@ -155,6 +156,21 @@ export default async function HomePage() {
       )}
     </div>
   );
+}
+
+async function safeGetHomeDashboard(userId: string): Promise<HomeDashboard> {
+  try {
+    return await buildHomeDashboard(userId);
+  } catch {
+    return {
+      volumeKgMonth: 0,
+      volumeDeltaPct: null,
+      seancesMonth: 0,
+      seancesDelta: null,
+      weekVolumesKg: [0, 0, 0, 0, 0, 0, 0],
+      recentPRs: [],
+    };
+  }
 }
 
 async function safeGetUser(id: string) {

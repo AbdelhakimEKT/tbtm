@@ -211,6 +211,65 @@ function dayKey(d: Date): string {
 }
 
 // ----------------------------------------------------------------------------
+// Historique : N dernières séances sur un exo (pour affichage style carnet)
+// ----------------------------------------------------------------------------
+
+export type ExerciceHistorySession = {
+  seanceId: string;
+  date: Date;
+  sets: { poidsKg: number; bwPlusKg: number | null; reps: number; rir: number | null }[];
+};
+
+export async function getRecentSessionsForExercice(args: {
+  userId: string;
+  exerciceId: string;
+  excludeSeanceId?: string;
+  limit?: number;
+}): Promise<ExerciceHistorySession[]> {
+  const limit = args.limit ?? 3;
+  const sessions = await prisma.seance.findMany({
+    where: {
+      userId: args.userId,
+      statut: "TERMINEE",
+      ...(args.excludeSeanceId ? { id: { not: args.excludeSeanceId } } : {}),
+      sets: {
+        some: {
+          exerciceId: args.exerciceId,
+          validated: true,
+          isWarmup: false,
+        },
+      },
+    },
+    orderBy: { date: "desc" },
+    take: limit,
+    select: {
+      id: true,
+      date: true,
+      sets: {
+        where: {
+          exerciceId: args.exerciceId,
+          validated: true,
+          isWarmup: false,
+        },
+        orderBy: { ordre: "asc" },
+        select: {
+          poidsKg: true,
+          bwPlusKg: true,
+          reps: true,
+          rir: true,
+        },
+      },
+    },
+  });
+
+  return sessions.map((s) => ({
+    seanceId: s.id,
+    date: s.date,
+    sets: s.sets,
+  }));
+}
+
+// ----------------------------------------------------------------------------
 // Détection PR
 // ----------------------------------------------------------------------------
 

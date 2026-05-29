@@ -13,6 +13,7 @@ import {
 } from "@/lib/seance";
 import { detectAndAwardBadges } from "@/lib/badges";
 import { computeCategorieForce } from "@/lib/categorie";
+import { logAudit } from "@/lib/admin";
 
 // ----------------------------------------------------------------------------
 // Démarrage : crée ou reprend une séance en cours pour ce programme
@@ -189,6 +190,44 @@ export async function unvalidateSet(
 
   // On supprime carrément la ligne (les non validés sont inférés depuis le plan)
   await prisma.seanceSet.delete({ where: { id: setId } });
+
+  revalidatePath(`/seance/${seanceId}/live`);
+  return { ok: true };
+}
+
+const SET_NOTE_MAX = 200;
+
+export async function updateSetNote(
+  seanceId: string,
+  setId: string,
+  rawNote: string | null,
+): Promise<SeanceActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Connecte-toi d'abord" };
+
+  const check = await requireSeanceEnCours(seanceId, session.user.id);
+  if ("error" in check) return { ok: false, error: check.error };
+
+  // Trim + cap length
+  const trimmed = (rawNote ?? "").trim();
+  if (trimmed.length > SET_NOTE_MAX) {
+    return { ok: false, error: `Note trop longue (max ${SET_NOTE_MAX} caractères)` };
+  }
+  const value = trimmed.length === 0 ? null : trimmed;
+
+  // Vérifie que le set appartient bien à cette séance
+  const set = await prisma.seanceSet.findUnique({
+    where: { id: setId },
+    select: { seanceId: true },
+  });
+  if (!set || set.seanceId !== seanceId) {
+    return { ok: false, error: "Set introuvable" };
+  }
+
+  await prisma.seanceSet.update({
+    where: { id: setId },
+    data: { notes: value },
+  });
 
   revalidatePath(`/seance/${seanceId}/live`);
   return { ok: true };
@@ -442,4 +481,151 @@ export async function abortSeance(
 
   revalidatePath("/");
   redirect("/");
+}
+
+// ----------------------------------------------------------------------------
+// Création manuelle d'une séance passée (backfill historique)
+// ----------------------------------------------------------------------------
+
+const manualSetSchema = z.object({
+  poidsKg: z.coerce.number().min(0).max(1000),
+  bwPlusKg: z.coerce.number().min(0).max(500).nullable().optional(),
+  reps: z.coerce.number().int().min(1).max(200),
+  rir: z.coerce.number().int().min(0).max(20).nullable().optional(),
+});
+
+const createManualSeanceSchema = z.object({
+  date: z.coerce.date(),
+  notes: z.string().max(1000).nullable().optional(),
+  exercices: z
+    .array(
+      z.object({
+        exerciceId: z.string().min(1),
+        sets: z.array(manualSetSchema).min(1),
+      }),
+    )
+    .min(1, "Au moins un exercice"),
+});
+
+export async function createManualSeance(
+  input: z.input<typeof createManualSeanceSchema>,
+): Promise<SeanceActionResult<{ id: string }>> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Connecte-toi d'abord" };
+
+  const parsed = createManualSeanceSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Données invalides",
+    };
+  }
+  const data = parsed.data;
+
+  // Vérifie que la date est dans le passé (on n'autorise pas du futur)
+  if (data.date.getTime() > Date.now()) {
+    return { ok: false, error: "La date doit être dans le passé" };
+  }
+
+  // Vérifie l'existence des exos
+  const exoIds = [...new Set(data.exercices.map((e) => e.exerciceId))];
+  const validExos = await prisma.exercice.findMany({
+    where: { id: { in: exoIds } },
+    select: { id: true },
+  });
+  if (validExos.length !== exoIds.length) {
+    return { ok: false, error: "Exercice introuvable" };
+  }
+
+  const volume = data.exercices.reduce(
+    (acc, exo) =>
+      acc +
+      exo.sets.reduce((sum, s) => {
+        const charge = s.poidsKg + (s.bwPlusKg ?? 0);
+        return sum + charge * s.reps;
+      }, 0),
+    0,
+  );
+
+  // Pas de XP, pas de streak, pas de PR. C'est du backfill pur.
+  const seance = await prisma.seance.create({
+    data: {
+      userId: session.user.id,
+      date: data.date,
+      statut: "TERMINEE",
+      manuelle: true,
+      xpGagne: 0,
+      volumeTotalKg: volume,
+      notes: data.notes ?? null,
+      dureeSec: null,
+      sets: {
+        create: data.exercices.flatMap((exo) =>
+          exo.sets.map((set, setIdx) => ({
+            exerciceId: exo.exerciceId,
+            ordre: setIdx + 1,
+            poidsKg: set.poidsKg,
+            bwPlusKg: set.bwPlusKg ?? null,
+            reps: set.reps,
+            rir: set.rir ?? null,
+            validated: true,
+            isWarmup: false,
+          })),
+        ),
+      },
+    },
+    select: { id: true },
+  });
+
+  await logAudit({
+    actorId: session.user.id,
+    action: "CREATE",
+    entityType: "SEANCE",
+    entityId: seance.id,
+    metadata: {
+      manuelle: true,
+      date: data.date.toISOString(),
+      volumeKg: volume,
+      nbExos: data.exercices.length,
+    },
+  });
+
+  revalidatePath("/");
+  revalidatePath("/stats");
+  return { ok: true, id: seance.id };
+}
+
+// ----------------------------------------------------------------------------
+// Suppression d'une séance
+// ----------------------------------------------------------------------------
+
+export async function deleteSeance(
+  seanceId: string,
+): Promise<SeanceActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Connecte-toi d'abord" };
+
+  const seance = await prisma.seance.findUnique({
+    where: { id: seanceId },
+    select: { id: true, userId: true },
+  });
+  if (!seance) return { ok: false, error: "Séance introuvable" };
+  if (seance.userId !== session.user.id) {
+    return { ok: false, error: "Pas ta séance" };
+  }
+
+  // Cascade : SeanceSet supprimés (onDelete: Cascade), PR détaché (SetNull).
+  // V1 : on ne rollback ni l'XP, ni le niveau, ni la streak — recalcul cross-séance
+  // trop fragile.
+  await prisma.seance.delete({ where: { id: seanceId } });
+
+  await logAudit({
+    actorId: session.user.id,
+    action: "DELETE",
+    entityType: "SEANCE",
+    entityId: seanceId,
+  });
+
+  revalidatePath("/");
+  revalidatePath("/stats");
+  return { ok: true };
 }

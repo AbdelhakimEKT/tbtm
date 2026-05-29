@@ -39,7 +39,7 @@ export function LandingHero() {
         <Card className="flex flex-col items-start gap-1.5">
           <Trophy className="size-4 text-gold" />
           <p className="text-xs font-medium">PR auto-détectés</p>
-          <p className="text-[10px] text-muted">Monstre, double monstre, triple monstre</p>
+          <p className="text-[10px] text-muted">1RM estimé, comparaison automatique</p>
         </Card>
         <Card className="flex flex-col items-start gap-1.5">
           <Users className="size-4 text-accent-soft" />

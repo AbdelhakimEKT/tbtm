@@ -12,6 +12,7 @@ import {
   ScanLine,
   Search,
   Sparkles,
+  Star,
   Utensils,
 } from "lucide-react";
 import type { CategorieRecette, PortionType, Repas } from "@prisma/client";
@@ -30,6 +31,8 @@ import {
   createNutritionLog,
   lookupBarcode,
   searchFood,
+  toggleFavoriIngredient,
+  toggleFavoriRecette,
 } from "../_actions";
 import type { OFFProduct } from "@/lib/openfoodfacts";
 
@@ -89,15 +92,78 @@ export function AjouterClient({
   date,
   recents,
   recettes,
+  favoriIngredients,
+  favoriIngredientIds,
+  favoriRecetteIds,
 }: {
   repas: Repas;
   date: string;
   recents: LocalIngredient[];
   recettes: RecipeForLog[];
+  favoriIngredients: LocalIngredient[];
+  favoriIngredientIds: string[];
+  favoriRecetteIds: string[];
 }) {
   const [picked, setPicked] = useState<PickedFood | null>(null);
   const [tab, setTab] = useState<"aliment" | "recette">("aliment");
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [favIngSet, setFavIngSet] = useState(
+    () => new Set(favoriIngredientIds),
+  );
+  const [favRecSet, setFavRecSet] = useState(
+    () => new Set(favoriRecetteIds),
+  );
+  // Liste affichée dans la section Favoris ingrédient (mutée à la volée).
+  const [favIngList, setFavIngList] = useState<LocalIngredient[]>(
+    () => favoriIngredients,
+  );
+
+  async function handleToggleIngFavori(ing: LocalIngredient) {
+    const wasFav = favIngSet.has(ing.id);
+    // Optimistic update
+    setFavIngSet((prev) => {
+      const next = new Set(prev);
+      if (wasFav) next.delete(ing.id);
+      else next.add(ing.id);
+      return next;
+    });
+    setFavIngList((prev) =>
+      wasFav
+        ? prev.filter((i) => i.id !== ing.id)
+        : prev.some((i) => i.id === ing.id)
+          ? prev
+          : [ing, ...prev],
+    );
+    const res = await toggleFavoriIngredient(ing.id);
+    if (!res.ok) {
+      // Revert
+      setFavIngSet((prev) => {
+        const next = new Set(prev);
+        if (wasFav) next.add(ing.id);
+        else next.delete(ing.id);
+        return next;
+      });
+    }
+  }
+
+  async function handleToggleRecFavori(recetteId: string) {
+    const wasFav = favRecSet.has(recetteId);
+    setFavRecSet((prev) => {
+      const next = new Set(prev);
+      if (wasFav) next.delete(recetteId);
+      else next.add(recetteId);
+      return next;
+    });
+    const res = await toggleFavoriRecette(recetteId);
+    if (!res.ok) {
+      setFavRecSet((prev) => {
+        const next = new Set(prev);
+        if (wasFav) next.add(recetteId);
+        else next.delete(recetteId);
+        return next;
+      });
+    }
+  }
 
   if (picked) {
     return (
@@ -159,11 +225,19 @@ export function AjouterClient({
         {tab === "aliment" ? (
           <AlimentTab
             recents={recents}
+            favoris={favIngList}
+            favoriIds={favIngSet}
+            onToggleFavori={handleToggleIngFavori}
             onPick={setPicked}
             onOpenScanner={() => setScannerOpen(true)}
           />
         ) : (
-          <RecetteTab recettes={recettes} onPick={setPicked} />
+          <RecetteTab
+            recettes={recettes}
+            favoriIds={favRecSet}
+            onToggleFavori={handleToggleRecFavori}
+            onPick={setPicked}
+          />
         )}
       </div>
     </>
@@ -176,10 +250,16 @@ export function AjouterClient({
 
 function AlimentTab({
   recents,
+  favoris,
+  favoriIds,
+  onToggleFavori,
   onPick,
   onOpenScanner,
 }: {
   recents: LocalIngredient[];
+  favoris: LocalIngredient[];
+  favoriIds: Set<string>;
+  onToggleFavori: (ing: LocalIngredient) => void;
   onPick: (food: PickedFood) => void;
   onOpenScanner: () => void;
 }) {
@@ -264,6 +344,28 @@ function AlimentTab({
         </button>
       )}
 
+      {/* Favoris */}
+      {q.trim().length < 2 && favoris.length > 0 && (
+        <section>
+          <CardLabel className="mb-2 inline-flex items-center gap-1 px-1">
+            <Star className="size-3 fill-gold text-gold" />
+            Favoris
+          </CardLabel>
+          <ul className="flex flex-col gap-1.5">
+            {favoris.map((ing) => (
+              <li key={ing.id}>
+                <PickableFoodRow
+                  ing={ing}
+                  isFavori
+                  onPick={() => onPick({ kind: "local", ingredient: ing })}
+                  onToggleFavori={() => onToggleFavori(ing)}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Recents */}
       {q.trim().length < 2 && recents.length > 0 && (
         <section>
@@ -274,19 +376,12 @@ function AlimentTab({
           <ul className="flex flex-col gap-1.5">
             {recents.map((ing) => (
               <li key={ing.id}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onPick({ kind: "local", ingredient: ing })
-                  }
-                  className="block w-full text-left"
-                >
-                  <FoodRow
-                    nom={ing.nom}
-                    photo={ing.photo}
-                    calories={ing.caloriesP100}
-                  />
-                </button>
+                <PickableFoodRow
+                  ing={ing}
+                  isFavori={favoriIds.has(ing.id)}
+                  onPick={() => onPick({ kind: "local", ingredient: ing })}
+                  onToggleFavori={() => onToggleFavori(ing)}
+                />
               </li>
             ))}
           </ul>
@@ -346,9 +441,13 @@ function AlimentTab({
 
 function RecetteTab({
   recettes,
+  favoriIds,
+  onToggleFavori,
   onPick,
 }: {
   recettes: RecipeForLog[];
+  favoriIds: Set<string>;
+  onToggleFavori: (recetteId: string) => void;
   onPick: (food: PickedFood) => void;
 }) {
   const [q, setQ] = useState("");
@@ -358,8 +457,9 @@ function RecetteTab({
         r.nom.toLowerCase().includes(q.trim().toLowerCase()),
       );
 
-  const mine = filtered.filter((r) => r.isMine);
-  const others = filtered.filter((r) => !r.isMine);
+  const favoris = filtered.filter((r) => favoriIds.has(r.id));
+  const mine = filtered.filter((r) => r.isMine && !favoriIds.has(r.id));
+  const others = filtered.filter((r) => !r.isMine && !favoriIds.has(r.id));
 
   if (recettes.length === 0) {
     return (
@@ -394,19 +494,39 @@ function RecetteTab({
         </label>
       )}
 
+      {favoris.length > 0 && (
+        <section>
+          <CardLabel className="mb-2 inline-flex items-center gap-1 px-1">
+            <Star className="size-3 fill-gold text-gold" />
+            Favoris
+          </CardLabel>
+          <ul className="flex flex-col gap-1.5">
+            {favoris.map((r) => (
+              <li key={r.id}>
+                <PickableRecipeRow
+                  recipe={r}
+                  isFavori
+                  onPick={() => onPick({ kind: "recipe", recipe: r })}
+                  onToggleFavori={() => onToggleFavori(r.id)}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {mine.length > 0 && (
         <section>
           <CardLabel className="mb-2 px-1">Mes recettes</CardLabel>
           <ul className="flex flex-col gap-1.5">
             {mine.map((r) => (
               <li key={r.id}>
-                <button
-                  type="button"
-                  onClick={() => onPick({ kind: "recipe", recipe: r })}
-                  className="block w-full text-left"
-                >
-                  <RecipeRow recipe={r} />
-                </button>
+                <PickableRecipeRow
+                  recipe={r}
+                  isFavori={false}
+                  onPick={() => onPick({ kind: "recipe", recipe: r })}
+                  onToggleFavori={() => onToggleFavori(r.id)}
+                />
               </li>
             ))}
           </ul>
@@ -419,13 +539,12 @@ function RecetteTab({
           <ul className="flex flex-col gap-1.5">
             {others.map((r) => (
               <li key={r.id}>
-                <button
-                  type="button"
-                  onClick={() => onPick({ kind: "recipe", recipe: r })}
-                  className="block w-full text-left"
-                >
-                  <RecipeRow recipe={r} />
-                </button>
+                <PickableRecipeRow
+                  recipe={r}
+                  isFavori={false}
+                  onPick={() => onPick({ kind: "recipe", recipe: r })}
+                  onToggleFavori={() => onToggleFavori(r.id)}
+                />
               </li>
             ))}
           </ul>
@@ -439,6 +558,76 @@ function RecetteTab({
         <Plus className="size-3" /> Créer une nouvelle recette
       </Link>
     </div>
+  );
+}
+
+function PickableFoodRow({
+  ing,
+  isFavori,
+  onPick,
+  onToggleFavori,
+}: {
+  ing: LocalIngredient;
+  isFavori: boolean;
+  onPick: () => void;
+  onToggleFavori: () => void;
+}) {
+  return (
+    <div className="relative">
+      <button type="button" onClick={onPick} className="block w-full text-left">
+        <FoodRow nom={ing.nom} photo={ing.photo} calories={ing.caloriesP100} />
+      </button>
+      <FavoriStarButton active={isFavori} onClick={onToggleFavori} />
+    </div>
+  );
+}
+
+function PickableRecipeRow({
+  recipe,
+  isFavori,
+  onPick,
+  onToggleFavori,
+}: {
+  recipe: RecipeForLog;
+  isFavori: boolean;
+  onPick: () => void;
+  onToggleFavori: () => void;
+}) {
+  return (
+    <div className="relative">
+      <button type="button" onClick={onPick} className="block w-full text-left">
+        <RecipeRow recipe={recipe} />
+      </button>
+      <FavoriStarButton active={isFavori} onClick={onToggleFavori} />
+    </div>
+  );
+}
+
+function FavoriStarButton({
+  active,
+  onClick,
+}: {
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={active ? "Retirer des favoris" : "Ajouter aux favoris"}
+      aria-pressed={active}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-bg/80 backdrop-blur-sm hover:bg-bg"
+    >
+      <Star
+        className={cn(
+          "size-3.5 transition-colors",
+          active ? "fill-gold text-gold" : "text-muted hover:text-fg",
+        )}
+      />
+    </button>
   );
 }
 
