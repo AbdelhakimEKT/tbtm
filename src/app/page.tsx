@@ -1,5 +1,14 @@
 import Link from "next/link";
-import { Flame, TrendingUp, Trophy } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronRight,
+  FileEdit,
+  Flame,
+  Plus,
+  TrendingUp,
+  Trophy,
+  XCircle,
+} from "lucide-react";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -119,6 +128,86 @@ export default async function HomePage() {
         </Card>
 
         <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between px-1">
+            <CardLabel>Mes séances</CardLabel>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/seance/manuelle"
+                className="inline-flex items-center gap-0.5 text-[11px] text-accent-soft hover:underline"
+              >
+                <Plus className="size-3" /> passée
+              </Link>
+              {dashboard.recentSeances.length > 0 && (
+                <Link
+                  href="/seance/historique"
+                  className="inline-flex items-center gap-0.5 text-[11px] text-muted-strong hover:text-fg"
+                >
+                  Tout <ChevronRight className="size-3" />
+                </Link>
+              )}
+            </div>
+          </div>
+          {dashboard.recentSeances.length === 0 ? (
+            <Card className="flex flex-col items-center gap-2 py-5 text-center">
+              <p className="text-xs text-muted-strong">
+                Pas encore de séance loggée.
+              </p>
+              <Link
+                href="/seance/manuelle"
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-accent-bg px-3 text-[11px] font-medium text-accent-soft hover:bg-accent-bg/70"
+              >
+                <Plus className="size-3" /> Ajouter une séance passée
+              </Link>
+            </Card>
+          ) : (
+            <Card className="flex flex-col gap-1.5">
+              {dashboard.recentSeances.map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/seance/${s.id}`}
+                  className="flex items-center gap-2 rounded-lg bg-bg px-2.5 py-2 transition-colors hover:bg-bg/60"
+                >
+                  {s.statut === "ANNULEE" ? (
+                    <XCircle className="size-3.5 shrink-0 text-danger" />
+                  ) : s.manuelle ? (
+                    <FileEdit className="size-3.5 shrink-0 text-muted-strong" />
+                  ) : (
+                    <CheckCircle2 className="size-3.5 shrink-0 text-success" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium">
+                      {s.programmeNom ?? "Séance libre"}
+                      {s.manuelle && (
+                        <span className="ml-1 text-[9px] font-normal text-muted">
+                          (passée)
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[10px] text-muted">
+                      {s.date.toLocaleDateString("fr-FR", {
+                        day: "2-digit",
+                        month: "short",
+                      })}
+                      {s.statut === "TERMINEE" && s.nbSets > 0 && (
+                        <>
+                          {" · "}
+                          {s.nbSets} série{s.nbSets > 1 ? "s" : ""}
+                          {s.volumeKg > 0 && (
+                            <> · {(s.volumeKg / 1000).toFixed(1)}t</>
+                          )}
+                        </>
+                      )}
+                      {s.statut === "ANNULEE" && " · abandonnée"}
+                    </p>
+                  </div>
+                  <ChevronRight className="size-3.5 shrink-0 text-muted" />
+                </Link>
+              ))}
+            </Card>
+          )}
+        </div>
+
+        <div className="mt-4">
           <CardLabel className="mb-2 px-1">Derniers PRs</CardLabel>
           {derniersPrs.length === 0 ? (
             <Card className="flex items-center gap-3 py-4">
@@ -169,6 +258,7 @@ async function safeGetHomeDashboard(userId: string): Promise<HomeDashboard> {
       seancesDelta: null,
       weekVolumesKg: [0, 0, 0, 0, 0, 0, 0],
       recentPRs: [],
+      recentSeances: [],
     };
   }
 }

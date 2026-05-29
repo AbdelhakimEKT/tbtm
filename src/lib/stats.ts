@@ -299,6 +299,15 @@ export type HomeDashboard = {
   seancesDelta: number | null;
   weekVolumesKg: number[];
   recentPRs: { exercice: string; poids: string; delta?: string }[];
+  recentSeances: {
+    id: string;
+    date: Date;
+    programmeNom: string | null;
+    statut: "TERMINEE" | "ANNULEE" | "EN_COURS";
+    manuelle: boolean;
+    volumeKg: number;
+    nbSets: number;
+  }[];
 };
 
 export async function buildHomeDashboard(userId: string): Promise<HomeDashboard> {
@@ -316,7 +325,7 @@ export async function buildHomeDashboard(userId: string): Promise<HomeDashboard>
   const endOfWeek = new Date(startOfWeek);
   endOfWeek.setDate(endOfWeek.getDate() + 7);
 
-  const [thisMonthSeances, lastMonthSeances, weekSeances, recentPRs] = await Promise.all([
+  const [thisMonthSeances, lastMonthSeances, weekSeances, recentPRs, recentSeancesRaw] = await Promise.all([
     prisma.seance.findMany({
       where: {
         userId,
@@ -355,6 +364,23 @@ export async function buildHomeDashboard(userId: string): Promise<HomeDashboard>
         date: true,
         exerciceId: true,
         exercice: { select: { nom: true, isLeste: true } },
+      },
+    }),
+    prisma.seance.findMany({
+      where: {
+        userId,
+        statut: { in: ["TERMINEE", "ANNULEE"] },
+      },
+      orderBy: { date: "desc" },
+      take: 5,
+      select: {
+        id: true,
+        date: true,
+        statut: true,
+        manuelle: true,
+        volumeTotalKg: true,
+        programme: { select: { nom: true } },
+        _count: { select: { sets: { where: { validated: true } } } },
       },
     }),
   ]);
@@ -414,6 +440,16 @@ export async function buildHomeDashboard(userId: string): Promise<HomeDashboard>
     };
   });
 
+  const recentSeances = recentSeancesRaw.map((s) => ({
+    id: s.id,
+    date: s.date,
+    programmeNom: s.programme?.nom ?? null,
+    statut: s.statut,
+    manuelle: s.manuelle,
+    volumeKg: s.volumeTotalKg,
+    nbSets: s._count.sets,
+  }));
+
   return {
     volumeKgMonth,
     volumeDeltaPct,
@@ -421,5 +457,6 @@ export async function buildHomeDashboard(userId: string): Promise<HomeDashboard>
     seancesDelta,
     weekVolumesKg,
     recentPRs: formattedRecentPRs,
+    recentSeances,
   };
 }
