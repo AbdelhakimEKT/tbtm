@@ -573,12 +573,34 @@ function PickableFoodRow({
   onToggleFavori: () => void;
 }) {
   return (
-    <div className="relative">
-      <button type="button" onClick={onPick} className="block w-full text-left">
-        <FoodRow nom={ing.nom} photo={ing.photo} calories={ing.caloriesP100} />
+    <Card className="flex items-stretch gap-0 overflow-hidden p-0 transition-colors hover:border-accent-border">
+      <button
+        type="button"
+        onClick={onPick}
+        className="flex min-w-0 flex-1 items-center gap-3 p-3 text-left"
+      >
+        {ing.photo ? (
+          <img
+            src={ing.photo}
+            alt=""
+            className="size-10 shrink-0 rounded-md object-cover"
+          />
+        ) : (
+          <div className="grid size-10 shrink-0 place-items-center rounded-md bg-accent-bg text-sm font-medium text-accent-soft">
+            {ing.nom.charAt(0).toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{ing.nom}</p>
+        </div>
+        <p className="shrink-0 text-right text-[11px] text-muted-strong">
+          {Math.round(ing.caloriesP100)} kcal
+          <br />
+          <span className="text-[9px] text-muted">/ 100g</span>
+        </p>
       </button>
       <FavoriStarButton active={isFavori} onClick={onToggleFavori} />
-    </div>
+    </Card>
   );
 }
 
@@ -594,12 +616,44 @@ function PickableRecipeRow({
   onToggleFavori: () => void;
 }) {
   return (
-    <div className="relative">
-      <button type="button" onClick={onPick} className="block w-full text-left">
-        <RecipeRow recipe={recipe} />
+    <Card className="flex items-stretch gap-0 overflow-hidden p-0 transition-colors hover:border-accent-border">
+      <button
+        type="button"
+        onClick={onPick}
+        className="flex min-w-0 flex-1 items-center gap-3 p-3 text-left"
+      >
+        {recipe.photo ? (
+          <img
+            src={recipe.photo}
+            alt=""
+            className="size-12 shrink-0 rounded-md object-cover"
+          />
+        ) : (
+          <div className="grid size-12 shrink-0 place-items-center rounded-md bg-accent-bg text-lg">
+            🍽️
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{recipe.nom}</p>
+          <p className="text-[10px] text-muted">
+            {CATEGORIE_RECETTE_LABEL[recipe.categorie]} · {recipe.portions}{" "}
+            portion{recipe.portions > 1 ? "s" : ""}
+            {!recipe.isMine && ` · par ${recipe.auteurPseudo}`}
+          </p>
+        </div>
+        <p className="shrink-0 text-right text-[11px]">
+          <span className="font-medium">
+            {recipe.macrosParPortion.calories}
+          </span>
+          <span className="text-[9px] text-muted"> kcal/p</span>
+          <br />
+          <span className="text-[9px] text-muted">
+            P{recipe.macrosParPortion.proteines}
+          </span>
+        </p>
       </button>
       <FavoriStarButton active={isFavori} onClick={onToggleFavori} />
-    </div>
+    </Card>
   );
 }
 
@@ -619,11 +673,11 @@ function FavoriStarButton({
         e.stopPropagation();
         onClick();
       }}
-      className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-bg/80 backdrop-blur-sm hover:bg-bg"
+      className="grid w-10 shrink-0 place-items-center border-l border-card-border/60 transition-colors hover:bg-bg/40"
     >
       <Star
         className={cn(
-          "size-3.5 transition-colors",
+          "size-4 transition-colors",
           active ? "fill-gold text-gold" : "text-muted hover:text-fg",
         )}
       />
